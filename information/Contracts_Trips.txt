@@ -1,0 +1,261 @@
+GOAL : 
+- Unified Trip Schema → one format for all raw trip data.
+- Unified Billing Model Schema → one structured way to store ANY contract rule.
+
+
+Model 1: The "Package" Model (Fixed Monthly)
+Best for: Managing costs with a fleet vendor. Logic: Client pays $50,000 flat. Vendor drives up to 5,000 km. If they drive 5,001km, they get an extra rate.
+
+JSON
+{
+  "billing_cycle_months": 1,
+  "monthly_fixed_pay": 50000.00,
+
+  "limits": {
+    "included_km": 5000,
+    "included_trips": 500
+  },
+
+  "vendor_payouts": {
+    "per_extra_km": 15.00,        // Performance Pay: Extra Distance
+    "per_extra_trip": 200.00,     // Performance Pay: Extra Trips
+    "night_shift_bonus": 100.00   // Performance Pay: Hardship
+  },
+
+  "employee_incentives": {
+    "delay_threshold_min": 15,    // SLA Breach Rule
+    "delay_compensation_amount": 50.00  // "Sorry for the delay" payout
+  }
+}
+
+Model 2: The "Trip" Model (Pay-Per-Use)
+Best for: On-demand cabs (like Uber/Ola integration). Logic: Pay a base fare + distance + time.
+
+JSON
+{
+  "billing_cycle_months": 1,
+
+  "rates": {
+    "base_fare": 100.00,
+    "per_km_rate": 12.00,
+    "night_multiplier": 1.5       // Vendor Performance Pay
+  },
+
+  "employee_incentives": {
+    "delay_threshold_min": 10,    // Stricter SLA for on-demand
+    "delay_compensation_amount": 30.00,
+  }
+}
+
+Model 3: Hybrid Variant A (Minimum Guarantee)
+Best for: Retaining vendors who need safety. Logic: "We pay you per trip, but we guarantee you at least $30,000/month even if no one travels."
+JSON
+{
+  "variant": "MIN_GUARANTEE",
+  "billing_cycle_months": 1,
+
+  "rates": {
+    "per_km_rate": 14.00,
+    "base_fare_per_trip": 50.00
+  },
+
+  "guarantee": {
+    "monthly_min_payout": 30000.00
+  },
+
+  "employee_incentives": {
+    "delay_threshold_min": 20,
+    "delay_compensation_amount": 50.00
+  }
+}
+
+
+Model 4: HYBRID B (Base Distance Tier)
+The Logic: "We pay a flat ₹300 for every trip up to 15km. If you drive more than 15km, we pay extra per km."
+
+Why it's Hybrid: It acts like a Fixed Package for short trips (predictable cost) but switches to a Trip Model for long trips.
+
+Business Case: Great for standard office commutes where 90% of employees live within 15km.
+JSON
+{
+  "variant": "BASE_DISTANCE_TIER",
+  "billing_cycle_months": 1,
+
+  "rates": {
+    "fixed_base_pay": 300.00,       // You get this no matter what (even for 1km)
+    "per_extra_km_rate": 18.00      // Charged ONLY for distance > included_km
+  },
+
+  "thresholds": {
+    "included_km_per_trip": 15.0    // The "Free" tier inside the fixed pay
+  },
+
+  "employee_incentives": {
+    "delay_threshold_min": 15,
+    "delay_compensation_amount": 40.00
+  }
+}
+
+Summary of the 4 Unlocked Models:
+- PACKAGE: Fixed Monthly Salary + OT (Vendor Performance).
+- TRIP: Standard Taxi Meter (Base + Time + Distance).
+- HYBRID (Min Guarantee): Pay-per-km, but Vendor guaranteed ₹30k/month.
+- HYBRID (Base Tier): Fixed Price per Trip (up to X km), then variable.
+
+
+Trips Data for Ingestion: 
+{
+  "trip_id": "TRIP_101",
+  "client_id": 1,
+  "vendor_id": 2,
+  "employee_id": 505,
+  
+  "booking_time": "2025-11-24T22:00:00",  // Scheduled Time (Used to calc Delay)
+  "pickup_time":  "2025-11-24T22:15:00",  // Wheels rolling
+  "dropoff_time": "2025-11-24T23:00:00",  // Trip end
+  
+  "distance_km": 12.5,
+  "vehicle_number": "KA-51-MD-9999",      // For Audit
+  "vehicle_type": "SEDAN"                 // For Pricing checks
+}
+this covers all the contracts listed and "if the ride involves night time... that many minutes will be charged"
+
+
+
+
+we need to implement :
+"Present a usable UI dashboard where internal users (MoveInSync operations and finance teams) 
+can: 
+○ View trip data summaries. 
+○ Configure billing models per client/vendor. 
+○ Generate and export reports for each stakeholder type."
+
+so the process would somewhat look like this : 
+
+That is actually the "Server-Driven UI" pattern, and it is superior because you can update the form structure (e.g., add a new field) by just changing Python code, without redeploying the React app.
+
+Since you prefer this (and it is cleaner), let’s move that TypeScript registry into Python.
+
+Here is how to implement the "Backend Template API" in 5 minutes.
+
+Step 1: Define the Templates in Python
+Create a new file backend/app/core/templates.py. This holds your "Form Logic."
+
+Python
+
+# backend/app/core/templates.py
+
+CONTRACT_TEMPLATES = {
+    "PACKAGE": {
+        "label": "Corporate Fleet (Package)",
+        "description": "Fixed monthly payment with overage limits.",
+        "sections": [
+            {
+                "title": "Base Payment",
+                "fields": [
+                    {"key": "monthly_fixed_pay", "label": "Monthly Fixed Pay", "type": "number", "required": True}
+                ]
+            },
+            {
+                "title": "Limits (Included)",
+                "fields": [
+                    {"key": "limits.included_km", "label": "Included KM", "type": "number"},
+                    {"key": "limits.included_trips", "label": "Included Trips", "type": "number"}
+                ]
+            },
+            {
+                "title": "Vendor Payouts (Overage)",
+                "fields": [
+                    {"key": "vendor_payouts.per_extra_km", "label": "Rate per Extra KM", "type": "number"},
+                    {"key": "vendor_payouts.per_extra_trip", "label": "Rate per Extra Trip", "type": "number"}
+                ]
+            },
+            {
+                "title": "Employee Incentives",
+                "fields": [
+                    {"key": "employee_incentives.delay_threshold_min", "label": "Delay Threshold (Mins)", "type": "number"},
+                    {"key": "employee_incentives.delay_compensation_amount", "label": "Compensation Amount", "type": "number"}
+                ]
+            }
+        ]
+    },
+    
+    "TRIP": {
+        "label": "On-Demand (Trip Model)",
+        "description": "Pay per use based on time and distance.",
+        "sections": [
+            {
+                "title": "Standard Rates",
+                "fields": [
+                    {"key": "rates.base_fare", "label": "Base Fare", "type": "number", "required": True},
+                    {"key": "rates.per_km_rate", "label": "Rate per KM", "type": "number", "required": True},
+                    {"key": "rates.night_multiplier", "label": "Night Multiplier (e.g. 1.5)", "type": "number"}
+                ]
+            },
+            {
+                "title": "Employee Incentives",
+                "fields": [
+                    {"key": "employee_incentives.delay_threshold_min", "label": "Delay Threshold (Mins)", "type": "number"},
+                    {"key": "employee_incentives.delay_compensation_amount", "label": "Compensation Amount", "type": "number"}
+                ]
+            }
+        ]
+    },
+    
+    # Add your HYBRID models here following the same structure...
+}
+Step 2: Expose the API Endpoint
+Add this to backend/app/routers/contracts.py.
+
+Python
+
+from fastapi import APIRouter, Depends
+from app.core.templates import CONTRACT_TEMPLATES
+# ... imports
+
+router = APIRouter()
+
+@router.get("/templates")
+def get_contract_templates(current_user: models.User = Depends(get_current_active_user)):
+    """
+    Returns the Form Structure for creating contracts.
+    Frontend uses this to render dynamic forms.
+    """
+    # Optional: Filter based on user role if needed
+    return CONTRACT_TEMPLATES
+Step 3: Consume it in React
+Now your Frontend is "dumb" (which is good). It just asks the backend "What form should I show?".
+
+In src/pages/ContractConfig.tsx:
+
+TypeScript
+
+// 1. Fetch the templates on load
+const { data: templates } = useQuery('contractTemplates', () => 
+  api.get('/contracts/templates').then(res => res.data)
+);
+
+// 2. When user selects "PACKAGE", look up the template
+const currentTemplate = templates ? templates[selectedModel] : null;
+
+// 3. Render
+return (
+  <div>
+    {currentTemplate?.sections.map(section => (
+      <div key={section.title}>
+        <h3>{section.title}</h3>
+        {section.fields.map(field => (
+           <InputField 
+             key={field.key} 
+             label={field.label} 
+             type={field.type} 
+             // Logic to update your form state based on field.key
+           />
+        ))}
+      </div>
+    ))}
+  </div>
+)
+Verdict: This is the Architecturally Correct way to do it.
+
+Pros: You change the Python file, and the React Form updates automatically.

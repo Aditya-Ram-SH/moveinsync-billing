@@ -1,0 +1,77 @@
+“auditable” here means:
+You can trace each value back to its data source.
+You can see the steps or rules used to compute it.
+You can show logs or history of changes.
+An independent person (not the one who built it) can follow the trail and confirm nothing was hidden or altered.
+So the dashboard isn’t just showing numbers — it shows a transparent path to those numbers.
+
+Example 1:
+You must show where each number came from so someone else can trace it.
+
+Example 2:
+You must keep logs so an outside reviewer can confirm you didn’t change data after the fact.
+
+make audit records immutable (append-only with timestamps, user IDs, and checksums), 
+store raw source snapshots and the exact calculation formula/version so results are fully replayable, 
+and provide exportable, human-readable provenance for reviewers.
+------------------------------------------------------------------------------------------------------------------------
+
+Actors/Users:
+
+1. Admin (MoveInSync internal)
+Full control → configure billing rules, onboard clients/vendors, run audits.
+
+2. Client (Corporate)
+Views monthly bills, trip reports, incentives, disputes.
+
+3. Vendor (Transport partner)
+Sees payable trips, payouts, disputes, trip-level calculations.
+
+4. Employee (Client’s employee taking the ride)
+Only needed for incentive tracking or viewing personal trip logs
+------------------------------------------------------------------------------------------------------------------------
+
+The RBAC Confusion (Client Missing?):
+
+it is likely a documentation oversight.
+
+- Fact: The requirements clearly state Clients must "View monthly bills, trip reports".
+
+- Solution: Treat the Client as a Read-Only User. They log in only to see their specific dashboard and download reports. The "Admin" (MoveInSync) does the actual setup.
+
+------------------------------------------------------------------------------------------------------------------------
+
+Tech Stack and hosting :
+
+Backend :- Python FastAPI
+Database :- PostgreSQL
+Frontend :- React
+Hosting :- Fronend on Vercel and Backend on Railway
+Using Docker for deployment, so it runs on any machine.
+
+------------------------------------------------------------------------------------------------------------------------
+
+Contract/Billing :
+
+Define system flows → ingestion → compute → report → audit.
+
+------------------------------------------------------------------------------------------------------------------------
+
+Core Unification :
+
+- Unified Trip Schema → one format for all raw trip data.
+- Unified Billing Model Schema → one structured way to store ANY contract rule.
+- Single Calculation Engine → one function/process that applies the rules to trips.
+- Single Reporting Engine → one place that generates Client/Vendor/Employee reports.
+
+
+complete lifecycle includes more steps :
+
+- Input ingestion → where raw data enters.
+- Contract + billing config management → admins configure models.
+- RBAC + tenants → who sees what.
+- Audit trail → logs, history, traceability.
+- UI dashboards → stats, charts.
+- Exporting → PDF/CSV.
+- Error handling → missing trips, invalid configs.
+- Caching & monitoring → basic.
