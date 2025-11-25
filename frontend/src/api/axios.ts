@@ -53,26 +53,58 @@ export const api = {
       employee_id: number | null;
     };
   }>("/auth/token", form),
-  listContracts: () => get<any[]>("/demo/contracts"), // DEMO MODE
-  createContract: (payload: any) => post("/demo/contracts", payload), // DEMO MODE
+  listContracts: () => get<any[]>("/contracts"),
+  createContract: (payload: any) => post("/contracts", payload),
   ingestTrips: (file: File) => {
     const form = new FormData();
     form.append("file", file);
-    return post<{ rows_ingested: number }>("/demo/trips/ingest-csv", form, { // DEMO MODE
+    return post<{ rows_ingested: number }>("/trips/ingest-csv", form, {
       headers: { "Content-Type": "multipart/form-data" },
     });
   },
-  runBilling: (payload: { client_id: number; vendor_id: number; billing_month: string }) =>
-    post<{ billing_run_id: number; status: string; notes?: string }>("/demo/billing/run", payload), // DEMO MODE
-  listBillingRuns: () => get<any[]>("/demo/billing-runs"), // DEMO MODE
+  runBilling: (payload: { client_id: number; vendor_id: number; year: number; month: number }) =>
+    post<{ billing_run_id: number; status: string; notes?: string }>("/billing/run", payload),
+  listBillingRuns: () => get<any[]>("/billing/"),
   getBillingReport: (id: number) => get<{
     billing_run: any;
     totals: { trips_processed: number; vendor_payout: number; employee_incentives: number; final_cost: number };
     charges: any[];
-  }>(`/demo/billing-report/${id}`), // DEMO MODE
-  getDashboardStats: () => get<any>("/demo/dashboard"), // DEMO MODE
+  }>(`/billing/${id}/report`),
+  getDashboardStats: () => get<any>("/stats/dashboard"),
+  getClientAnalytics: () => get<{
+    cost_trends: Array<{ month: string; total_cost: number; trip_count: number }>;
+    cost_by_vendor: Array<{ vendor_id: number; vendor_name: string; total_cost: number; trip_count: number }>;
+    trips_over_time: Array<{ month: string; trip_count: number }>;
+    trip_status_distribution: Array<{ status: string; count: number }>;
+    distance_over_time: Array<{ month: string; total_distance: number }>;
+    billing_runs_timeline: Array<{
+      billing_run_id: number;
+      billing_start: string;
+      billing_end: string;
+      status: string;
+      total_cost: number;
+      started_at: string;
+    }>;
+  }>("/stats/client-analytics"),
+  getVendorAnalytics: () => get<{
+    payout_trends: Array<{ month: string; total_payout: number; trip_count: number }>;
+    payout_by_client: Array<{ client_id: number; client_name: string; total_payout: number; trip_count: number }>;
+    trips_over_time: Array<{ month: string; trip_count: number }>;
+    trip_status_distribution: Array<{ status: string; count: number }>;
+    distance_over_time: Array<{ month: string; total_distance: number }>;
+    billing_runs_timeline: Array<{
+      billing_run_id: number;
+      billing_start: string;
+      billing_end: string;
+      status: string;
+      total_payout: number;
+      started_at: string;
+    }>;
+  }>("/stats/vendor-analytics"),
   listTrips: () => get<any[]>("/trips/"),
-  resetDemo: () => post("/demo/reset", {}), // DEMO MODE - Reset for repeatable demos
+  getEmployeeTrips: () => get<any[]>("/trips/employee/my-trips"),
+  listClients: () => get<{ client_id: number; name: string }[]>("/clients"),
+  listVendors: () => get<{ vendor_id: number; name: string }[]>("/vendors"),
 };
 
 export { apiClient };

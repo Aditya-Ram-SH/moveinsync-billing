@@ -5,6 +5,8 @@ type ContractDetailsProps = {
     contract_id: number;
     client_id: number;
     vendor_id: number;
+    client_username?: string;
+    vendor_username?: string;
     model_type: string;
     config_json: any;
     version: number;
@@ -31,7 +33,7 @@ export const ContractDetails = ({ contract }: ContractDetailsProps) => {
             Contract #{contract.contract_id}
           </h2>
           <p className="text-sm text-slate-600">
-            Client ID: {contract.client_id} • Vendor ID: {contract.vendor_id} • Version: {contract.version}
+            Client: {contract.client_username || `Client #${contract.client_id}`} • Vendor: {contract.vendor_username || `Vendor #${contract.vendor_id}`} • Version: {contract.version}
           </p>
         </div>
         <div className="text-right">

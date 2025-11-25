@@ -20,17 +20,19 @@ class BillingEngine:
         *,
         client_id: int,
         vendor_id: int,
-        billing_month: date,
+        billing_start: date,
+        billing_end: date,
         triggered_by: int,
     ) -> BillingRun:
+        # Check contract is active at billing_start
         contract = (
             self.db.query(Contract)
             .filter(
                 Contract.client_id == client_id,
                 Contract.vendor_id == vendor_id,
                 Contract.is_active.is_(True),
-                Contract.start_date <= billing_month,
-                Contract.end_date >= billing_month,
+                Contract.start_date <= billing_start,
+                Contract.end_date >= billing_start,
             )
             .order_by(Contract.version.desc())
             .first()
@@ -38,43 +40,45 @@ class BillingEngine:
         if not contract:
             raise ValueError("No active contract found")
 
+        # Check if billing run already exists
         run = (
             self.db.query(BillingRun)
             .filter(
                 BillingRun.client_id == client_id,
                 BillingRun.vendor_id == vendor_id,
-                BillingRun.billing_month == billing_month,
+                BillingRun.billing_start == billing_start,
             )
             .first()
         )
 
+        # If run exists and is SUCCESS, return it without recalculating
         if run and run.status == "SUCCESS":
-            # Allow overwriting only if provisional (not SUCCESS)
-            raise ValueError("Billing run already finalized for this month")
+            return run
 
-        if not run:
-            run = BillingRun(
-                client_id=client_id,
-                vendor_id=vendor_id,
-                billing_month=billing_month,
-                triggered_by=triggered_by,
-                status="RUNNING",
-            )
-            self.db.add(run)
-            self.db.flush()
-        else:
+        # If run exists but is FAILED or RUNNING, recalculate
+        if run:
+            # Delete old charges
             self.db.execute(delete(TripCharge).where(TripCharge.billing_run_id == run.billing_run_id))
             run.status = "RUNNING"
             run.started_at = datetime.utcnow()
             run.completed_at = None
             run.notes = None
-
-        # Calculate period: from first day of billing_month to first day of next month
-        period_start = datetime(billing_month.year, billing_month.month, 1)
-        if billing_month.month == 12:
-            next_month = datetime(billing_month.year + 1, 1, 1)
         else:
-            next_month = datetime(billing_month.year, billing_month.month + 1, 1)
+            # Create new run
+            run = BillingRun(
+                client_id=client_id,
+                vendor_id=vendor_id,
+                billing_start=billing_start,
+                billing_end=billing_end,
+                triggered_by=triggered_by,
+                status="RUNNING",
+            )
+            self.db.add(run)
+            self.db.flush()
+
+        # Convert dates to datetime for trip query
+        period_start = datetime.combine(billing_start, datetime.min.time())
+        period_end = datetime.combine(billing_end, datetime.min.time())
 
         trips: List[Trip] = (
             self.db.query(Trip)
@@ -83,7 +87,7 @@ class BillingEngine:
                 Trip.vendor_id == vendor_id,
                 Trip.status == "INGESTED",
                 Trip.start_time >= period_start,
-                Trip.start_time < next_month,
+                Trip.start_time < period_end,
             )
             .order_by(Trip.start_time)
             .all()
@@ -93,7 +97,7 @@ class BillingEngine:
             # No trips found - still create billing run but mark with note
             run.status = "SUCCESS"
             run.completed_at = datetime.utcnow()
-            run.notes = f"No INGESTED trips found for client {client_id}, vendor {vendor_id} in {billing_month.strftime('%Y-%m')}"
+            run.notes = f"No INGESTED trips found for client {client_id}, vendor {vendor_id} for period {billing_start.isoformat()} to {billing_end.isoformat()}"
             
             # Create audit log even with 0 trips
             record_audit_log(
@@ -105,7 +109,8 @@ class BillingEngine:
                     "billing_run_id": run.billing_run_id,
                     "client_id": run.client_id,
                     "vendor_id": run.vendor_id,
-                    "billing_month": run.billing_month.isoformat(),
+                    "billing_start": run.billing_start.isoformat(),
+                    "billing_end": run.billing_end.isoformat(),
                     "status": run.status,
                     "trips_processed": 0,
                     "total_vendor_payout": 0.0,
@@ -176,7 +181,8 @@ class BillingEngine:
                 "billing_run_id": run.billing_run_id,
                 "client_id": run.client_id,
                 "vendor_id": run.vendor_id,
-                "billing_month": run.billing_month.isoformat(),
+                "billing_start": run.billing_start.isoformat(),
+                "billing_end": run.billing_end.isoformat(),
                 "status": run.status,
                 "trips_processed": len(charges),
                 "total_vendor_payout": float(total_vendor_payout),

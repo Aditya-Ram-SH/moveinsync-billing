@@ -92,13 +92,14 @@ class Contract(Base):
 class BillingRun(Base):
     __tablename__ = "billing_runs"
     __table_args__ = (
-        UniqueConstraint("client_id", "vendor_id", "billing_month", name="uniq_billing_run"),
+        UniqueConstraint("client_id", "vendor_id", "billing_start", name="uniq_billing_run"),
     )
 
     billing_run_id = Column(Integer, primary_key=True, index=True)
     client_id = Column(Integer, ForeignKey("clients.client_id"), nullable=False)
     vendor_id = Column(Integer, ForeignKey("vendors.vendor_id"), nullable=False)
-    billing_month = Column(Date, nullable=False)
+    billing_start = Column(Date, nullable=False)
+    billing_end = Column(Date, nullable=False)
     triggered_by = Column(Integer, ForeignKey("users.user_id"))
     status = Column(
         Enum("RUNNING", "SUCCESS", "FAILED", name="billing_status_enum"),

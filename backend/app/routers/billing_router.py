@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models import AuditLog, BillingRun, Trip, TripCharge, User
 from app.routers.deps import get_current_admin, get_current_user
-from app.schemas import BillingRunCreate
+from app.schemas.billing import BillingRunCreate, normalize_billing_period
 from app.services.billing_engine import BillingEngine
 
 router = APIRouter()
@@ -18,62 +18,39 @@ def list_billing_runs(
     current_user: User = Depends(get_current_user),
 ):
     """List billing runs filtered by user role."""
-    # Re-query user to ensure we have fresh data with all relationships
-    user = db.query(User).filter(User.user_id == current_user.user_id).first()
-    if not user:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
-    
-    # Debug: Log user info
-    import logging
-    logger = logging.getLogger(__name__)
-    logger.info(f"User {user.username} (role={user.role}, client_id={user.client_id}, vendor_id={user.vendor_id}) requesting billing runs")
-    
     query = db.query(BillingRun)
     
-    # Role-based filtering - ensure we use the correct IDs
-    if user.role == "CLIENT":
-        client_id = user.client_id
-        if client_id is None:
-            logger.warning(f"User {user.username} has no client_id")
-            return []
-        # Client sees billing runs where they are the client
-        # Use explicit int() to ensure type matching
-        query = query.filter(BillingRun.client_id == int(client_id))
-        logger.info(f"Filtering billing runs for CLIENT with client_id={client_id} (type={type(client_id)})")
-    elif user.role == "VENDOR":
-        vendor_id = user.vendor_id
-        if vendor_id is None:
-            logger.warning(f"User {user.username} has no vendor_id")
-            return []
-        # Vendor sees billing runs where they are the vendor
-        # Use explicit int() to ensure type matching
-        query = query.filter(BillingRun.vendor_id == int(vendor_id))
-        logger.info(f"Filtering billing runs for VENDOR with vendor_id={vendor_id} (type={type(vendor_id)})")
-    elif user.role == "EMPLOYEE":
+    # Role-based filtering
+    if current_user.role == "CLIENT":
+        if current_user.client_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User account missing client_id. Please contact administrator."
+            )
+        query = query.filter(BillingRun.client_id == current_user.client_id)
+    elif current_user.role == "VENDOR":
+        if current_user.vendor_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User account missing vendor_id. Please contact administrator."
+            )
+        query = query.filter(BillingRun.vendor_id == current_user.vendor_id)
+    elif current_user.role == "EMPLOYEE":
         # Employees don't see billing runs
         return []
     # ADMIN sees all (no filter)
     
-    # Get all billing runs for comparison
-    all_runs = db.query(BillingRun).all()
-    logger.info(f"Total billing runs in DB: {len(all_runs)}")
-    for r in all_runs:
-        logger.info(f"  All Run {r.billing_run_id}: client_id={r.client_id}, vendor_id={r.vendor_id}")
-    
-    # Order by started_at desc
+    # Get runs ordered by most recent
     runs = query.order_by(BillingRun.started_at.desc()).all()
     
-    logger.info(f"Found {len(runs)} billing runs for user {user.username} after filtering")
-    for run in runs:
-        logger.info(f"  Run {run.billing_run_id}: client_id={run.client_id}, vendor_id={run.vendor_id}, status={run.status}")
-    
-    # Serialize properly
-    result = [
+    # Serialize
+    return [
         {
             "billing_run_id": run.billing_run_id,
             "client_id": run.client_id,
             "vendor_id": run.vendor_id,
-            "billing_month": run.billing_month.isoformat() if run.billing_month else None,
+            "billing_start": run.billing_start.isoformat() if run.billing_start else None,
+            "billing_end": run.billing_end.isoformat() if run.billing_end else None,
             "status": run.status,
             "started_at": run.started_at.isoformat() if run.started_at else None,
             "completed_at": run.completed_at.isoformat() if run.completed_at else None,
@@ -81,8 +58,6 @@ def list_billing_runs(
         }
         for run in runs
     ]
-    
-    return result
 
 
 @router.post("/run", status_code=status.HTTP_201_CREATED)
@@ -91,18 +66,16 @@ def run_billing(
     db: Session = Depends(get_db),
     current_user=Depends(get_current_admin),
 ):
-    if payload.billing_month.day != 1:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="billing_month must be the first day of the month",
-        )
+    # Normalize year/month to billing period
+    billing_start, billing_end = normalize_billing_period(payload.year, payload.month)
 
     engine = BillingEngine(db)
     try:
         billing_run = engine.run(
             client_id=payload.client_id,
             vendor_id=payload.vendor_id,
-            billing_month=payload.billing_month,
+            billing_start=billing_start,
+            billing_end=billing_end,
             triggered_by=current_user.user_id,
         )
     except ValueError as exc:
@@ -166,7 +139,8 @@ def get_billing_report(
             "billing_run_id": run.billing_run_id,
             "client_id": run.client_id,
             "vendor_id": run.vendor_id,
-            "billing_month": run.billing_month.isoformat(),
+            "billing_start": run.billing_start.isoformat(),
+            "billing_end": run.billing_end.isoformat(),
             "status": run.status,
             "notes": run.notes,
         },
@@ -354,7 +328,8 @@ def debug_my_billing_runs(
                 "billing_run_id": r.billing_run_id,
                 "client_id": r.client_id,
                 "vendor_id": r.vendor_id,
-                "billing_month": r.billing_month.isoformat() if r.billing_month else None,
+                "billing_start": r.billing_start.isoformat() if r.billing_start else None,
+                "billing_end": r.billing_end.isoformat() if r.billing_end else None,
                 "status": r.status,
             }
             for r in all_runs
@@ -364,7 +339,8 @@ def debug_my_billing_runs(
                 "billing_run_id": r.billing_run_id,
                 "client_id": r.client_id,
                 "vendor_id": r.vendor_id,
-                "billing_month": r.billing_month.isoformat() if r.billing_month else None,
+                "billing_start": r.billing_start.isoformat() if r.billing_start else None,
+                "billing_end": r.billing_end.isoformat() if r.billing_end else None,
                 "status": r.status,
             }
             for r in filtered_runs
@@ -449,7 +425,8 @@ def debug_check_data(
             "billing_run_id": r.billing_run_id,
             "client_id": r.client_id,
             "vendor_id": r.vendor_id,
-            "billing_month": r.billing_month.isoformat() if r.billing_month else None,
+            "billing_start": r.billing_start.isoformat() if r.billing_start else None,
+            "billing_end": r.billing_end.isoformat() if r.billing_end else None,
             "status": r.status,
             "charge_count": db.query(TripCharge).filter(TripCharge.billing_run_id == r.billing_run_id).count(),
         }

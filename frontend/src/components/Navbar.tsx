@@ -7,7 +7,7 @@ const getLinksForRole = (role: string | null) => {
     { to: "/dashboard", label: "Dashboard", roles: ["ADMIN", "CLIENT", "VENDOR", "EMPLOYEE"] },
     { to: "/contracts", label: "Contracts", roles: ["ADMIN", "CLIENT", "VENDOR"] },
     { to: "/billing", label: "Billing", roles: ["ADMIN", "CLIENT", "VENDOR"] },
-    { to: "/trips/ingest", label: "Trip Ingestion", roles: ["ADMIN"] },
+    { to: "/trips/ingest", label: "Trip Ingestion", roles: ["ADMIN", "VENDOR"] },
   ];
   
   if (!role) return [];

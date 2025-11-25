@@ -15,6 +15,8 @@ type ContractRow = {
   contract_id: number;
   client_id: number;
   vendor_id: number;
+  client_username?: string;
+  vendor_username?: string;
   model_type: string;
   version: number;
   is_active: boolean;
@@ -69,6 +71,19 @@ export const Contracts = () => {
   const [selectedContract, setSelectedContract] = useState<ContractRow | null>(null);
   
   const isAdmin = user?.role === "ADMIN";
+
+  // Fetch clients and vendors for dropdowns
+  const { data: clients } = useQuery({
+    queryKey: ["clients"],
+    queryFn: api.listClients,
+    enabled: isAdmin,
+  });
+
+  const { data: vendors } = useQuery({
+    queryKey: ["vendors"],
+    queryFn: api.listVendors,
+    enabled: isAdmin,
+  });
 
   const { data: contracts, refetch } = useQuery({
     queryKey: ["contracts"],
@@ -132,8 +147,8 @@ export const Contracts = () => {
                 {(contracts as ContractRow[] | undefined)?.map((contract) => (
                   <TableRow key={contract.contract_id}>
                     <TableCell>{contract.contract_id}</TableCell>
-                    <TableCell>{contract.client_id}</TableCell>
-                    <TableCell>{contract.vendor_id}</TableCell>
+                    <TableCell>{contract.client_username || `Client #${contract.client_id}`}</TableCell>
+                    <TableCell>{contract.vendor_username || `Vendor #${contract.vendor_id}`}</TableCell>
                     <TableCell>{contract.model_type}</TableCell>
                     <TableCell>{contract.version}</TableCell>
                     <TableCell>{contract.is_active ? "Active" : "Inactive"}</TableCell>
@@ -166,23 +181,49 @@ export const Contracts = () => {
           </CardHeader>
           <CardContent>
             <form className="space-y-4" onSubmit={handleSubmit}>
-              <FormField label="Client ID">
-                <Input
-                  type="number"
-                  value={form.clientId}
-                  onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
-                  required
-                  min={1}
-                />
+              <FormField label="Client">
+                {clients && clients.length > 0 ? (
+                  <Select
+                    value={form.clientId}
+                    onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
+                    required
+                    options={[
+                      { label: "Select a client...", value: "" },
+                      ...clients.map((client) => ({
+                        label: client.name,
+                        value: client.name, // Store username, not ID
+                      })),
+                    ]}
+                  />
+                ) : (
+                  <Input
+                    type="text"
+                    value="Loading clients..."
+                    disabled
+                  />
+                )}
               </FormField>
-              <FormField label="Vendor ID">
-                <Input
-                  type="number"
-                  value={form.vendorId}
-                  onChange={(e) => setForm((prev) => ({ ...prev, vendorId: e.target.value }))}
-                  required
-                  min={1}
-                />
+              <FormField label="Vendor">
+                {vendors && vendors.length > 0 ? (
+                  <Select
+                    value={form.vendorId}
+                    onChange={(e) => setForm((prev) => ({ ...prev, vendorId: e.target.value }))}
+                    required
+                    options={[
+                      { label: "Select a vendor...", value: "" },
+                      ...vendors.map((vendor) => ({
+                        label: vendor.name,
+                        value: vendor.name, // Store username, not ID
+                      })),
+                    ]}
+                  />
+                ) : (
+                  <Input
+                    type="text"
+                    value="Loading vendors..."
+                    disabled
+                  />
+                )}
               </FormField>
               <div className="grid grid-cols-2 gap-3">
                 <FormField label="Version">
@@ -339,8 +380,8 @@ const buildPayload = (
   }
 
   return {
-    client_id: Number(form.clientId),
-    vendor_id: Number(form.vendorId),
+    client_username: form.clientId, // Now stores username
+    vendor_username: form.vendorId, // Now stores username
     version: Number(form.version),
     start_date: form.startDate,
     end_date: form.endDate,

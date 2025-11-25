@@ -6,6 +6,7 @@ import { Button } from "../components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Input } from "../components/ui/input";
 import { FormField } from "../components/FormField";
+import { Select } from "../components/Select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { useAuth } from "../context/AuthContext";
 
@@ -13,7 +14,8 @@ type BillingRun = {
   billing_run_id: number;
   client_id: number;
   vendor_id: number;
-  billing_month: string;
+  billing_start: string;
+  billing_end: string;
   status: string;
   started_at: string;
   completed_at: string | null;
@@ -23,7 +25,8 @@ type BillingRun = {
 type BillingRunPayload = {
   client_id: number;
   vendor_id: number;
-  billing_month: string;
+  year: number;
+  month: number;
 };
 
 export const Billing = () => {
@@ -31,7 +34,8 @@ export const Billing = () => {
   const [form, setForm] = useState({
     clientId: "",
     vendorId: "",
-    billingMonth: "",
+    billingYear: new Date().getFullYear().toString(),
+    billingMonth: (new Date().getMonth() + 1).toString(),
   });
   const [feedback, setFeedback] = useState<string>("");
   const [lastRunId, setLastRunId] = useState<number | null>(null);
@@ -39,6 +43,17 @@ export const Billing = () => {
   const [showAudit, setShowAudit] = useState(false);
   
   const isAdmin = user?.role === "ADMIN";
+
+  // Fetch clients and vendors for dropdowns and name display
+  const { data: clients } = useQuery({
+    queryKey: ["clients"],
+    queryFn: api.listClients,
+  });
+
+  const { data: vendors } = useQuery({
+    queryKey: ["vendors"],
+    queryFn: api.listVendors,
+  });
 
   const { data: billingRuns, refetch, isLoading, error } = useQuery<BillingRun[]>({
     queryKey: ["billing-runs"],
@@ -50,17 +65,21 @@ export const Billing = () => {
     },
   });
 
-  // Debug logging
-  console.log("Billing component - billingRuns:", billingRuns);
-  console.log("Billing component - isLoading:", isLoading);
-  console.log("Billing component - error:", error);
+  // Create lookup maps for client/vendor names
+  const clientMap = new Map(clients?.map(c => [c.client_id, c.name]) || []);
+  const vendorMap = new Map(vendors?.map(v => [v.vendor_id, v.name]) || []);
 
   const runBillingMutation = useMutation({
     mutationFn: (payload: BillingRunPayload) => post<BillingRun>("/billing/run", payload),
     onSuccess: (data) => {
       setFeedback(`Billing run #${data.billing_run_id} completed successfully!`);
       setLastRunId(data.billing_run_id);
-      setForm({ clientId: "", vendorId: "", billingMonth: "" });
+      setForm({ 
+        clientId: "", 
+        vendorId: "", 
+        billingYear: new Date().getFullYear().toString(),
+        billingMonth: (new Date().getMonth() + 1).toString(),
+      });
       refetch();
     },
     onError: (error: any) => {
@@ -71,15 +90,25 @@ export const Billing = () => {
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     
-    if (!form.clientId || !form.vendorId || !form.billingMonth) {
+    if (!form.clientId || !form.vendorId || !form.billingYear || !form.billingMonth) {
       setFeedback("Please fill all required fields.");
       return;
     }
 
+    // Convert usernames to IDs
+    const selectedClient = clients?.find(c => c.name === form.clientId);
+    const selectedVendor = vendors?.find(v => v.name === form.vendorId);
+    
+    if (!selectedClient || !selectedVendor) {
+      setFeedback("Invalid client or vendor selection.");
+      return;
+    }
+
     const payload: BillingRunPayload = {
-      client_id: Number(form.clientId),
-      vendor_id: Number(form.vendorId),
-      billing_month: form.billingMonth ? `${form.billingMonth}-01` : "",
+      client_id: selectedClient.client_id,
+      vendor_id: selectedVendor.vendor_id,
+      year: parseInt(form.billingYear, 10),
+      month: parseInt(form.billingMonth, 10),
     };
 
     runBillingMutation.mutate(payload);
@@ -99,7 +128,7 @@ export const Billing = () => {
 
   const handleExport = async (runId: number) => {
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/demo/billing/${runId}/export`, {
+      const response = await fetch(`${import.meta.env.VITE_API_URL ?? "http://localhost:8000"}/billing/${runId}/export`, {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("access_token")}`,
         },
@@ -168,10 +197,14 @@ export const Billing = () => {
                   billingRuns.map((run) => (
                     <TableRow key={run.billing_run_id}>
                       <TableCell>#{run.billing_run_id}</TableCell>
-                      <TableCell>{run.client_id}</TableCell>
-                      <TableCell>{run.vendor_id}</TableCell>
                       <TableCell>
-                        {new Date(run.billing_month).toLocaleDateString("en-US", {
+                        {clientMap.get(run.client_id) || `Client #${run.client_id}`}
+                      </TableCell>
+                      <TableCell>
+                        {vendorMap.get(run.vendor_id) || `Vendor #${run.vendor_id}`}
+                      </TableCell>
+                      <TableCell>
+                        {new Date(run.billing_start).toLocaleDateString("en-US", {
                           year: "numeric",
                           month: "long",
                         })}
@@ -232,35 +265,87 @@ export const Billing = () => {
           </CardHeader>
           <CardContent>
             <form className="space-y-4" onSubmit={handleSubmit}>
-              <FormField label="Client ID">
-                <Input
-                  type="number"
-                  value={form.clientId}
-                  onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
-                  required
-                  min={1}
-                  placeholder="e.g., 1"
-                />
+              <FormField label="Client">
+                {clients && clients.length > 0 ? (
+                  <Select
+                    value={form.clientId}
+                    onChange={(e) => setForm((prev) => ({ ...prev, clientId: e.target.value }))}
+                    required
+                    options={[
+                      { label: "Select a client...", value: "" },
+                      ...clients.map((client) => ({
+                        label: client.name,
+                        value: client.name, // Store username, not ID
+                      })),
+                    ]}
+                  />
+                ) : (
+                  <Input
+                    type="text"
+                    value="Loading clients..."
+                    disabled
+                  />
+                )}
               </FormField>
 
-              <FormField label="Vendor ID">
-                <Input
-                  type="number"
-                  value={form.vendorId}
-                  onChange={(e) => setForm((prev) => ({ ...prev, vendorId: e.target.value }))}
+              <FormField label="Vendor">
+                {vendors && vendors.length > 0 ? (
+                  <Select
+                    value={form.vendorId}
+                    onChange={(e) => setForm((prev) => ({ ...prev, vendorId: e.target.value }))}
+                    required
+                    options={[
+                      { label: "Select a vendor...", value: "" },
+                      ...vendors.map((vendor) => ({
+                        label: vendor.name,
+                        value: vendor.name, // Store username, not ID
+                      })),
+                    ]}
+                  />
+                ) : (
+                  <Input
+                    type="text"
+                    value="Loading vendors..."
+                    disabled
+                  />
+                )}
+              </FormField>
+
+              <FormField label="Billing Year">
+                <Select
+                  value={form.billingYear}
+                  onChange={(e) => setForm((prev) => ({ ...prev, billingYear: e.target.value }))}
                   required
-                  min={1}
-                  placeholder="e.g., 1"
+                  options={[
+                    { label: "Select year...", value: "" },
+                    ...Array.from({ length: 10 }, (_, i) => {
+                      const year = new Date().getFullYear() - 2 + i;
+                      return { label: year.toString(), value: year.toString() };
+                    }),
+                  ]}
                 />
               </FormField>
 
               <FormField label="Billing Month">
-                <Input
-                  type="month"
+                <Select
                   value={form.billingMonth}
                   onChange={(e) => setForm((prev) => ({ ...prev, billingMonth: e.target.value }))}
                   required
-                  placeholder="YYYY-MM"
+                  options={[
+                    { label: "Select month...", value: "" },
+                    { label: "January", value: "1" },
+                    { label: "February", value: "2" },
+                    { label: "March", value: "3" },
+                    { label: "April", value: "4" },
+                    { label: "May", value: "5" },
+                    { label: "June", value: "6" },
+                    { label: "July", value: "7" },
+                    { label: "August", value: "8" },
+                    { label: "September", value: "9" },
+                    { label: "October", value: "10" },
+                    { label: "November", value: "11" },
+                    { label: "December", value: "12" },
+                  ]}
                 />
               </FormField>
 

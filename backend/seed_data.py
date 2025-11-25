@@ -97,50 +97,87 @@ def seed_database():
             db.add(admin)
             users.append(admin)
         
-        # Client users (1 per client)
+        # Client users (1 per client) - update existing or create new
         for idx, client in enumerate(clients):
-            client_user = User(
-                username=f"client{idx+1}",
-                password_hash=get_password_hash("client123"),
-                role="CLIENT",
-                client_id=client.client_id
-            )
-            db.add(client_user)
-            users.append(client_user)
+            username = f"client{idx+1}"
+            existing_user = db.query(User).filter(User.username == username).first()
+            if existing_user:
+                # Update existing user to ensure client_id is set
+                existing_user.client_id = client.client_id
+                existing_user.role = "CLIENT"
+                users.append(existing_user)
+            else:
+                client_user = User(
+                    username=username,
+                    password_hash=get_password_hash("client123"),
+                    role="CLIENT",
+                    client_id=client.client_id
+                )
+                db.add(client_user)
+                users.append(client_user)
         
-        # Vendor users (1 per vendor)
+        # Vendor users (1 per vendor) - update existing or create new
         for idx, vendor in enumerate(vendors):
-            vendor_user = User(
-                username=f"vendor{idx+1}",
-                password_hash=get_password_hash("vendor123"),
-                role="VENDOR",
-                vendor_id=vendor.vendor_id
-            )
-            db.add(vendor_user)
-            users.append(vendor_user)
+            username = f"vendor{idx+1}"
+            existing_user = db.query(User).filter(User.username == username).first()
+            if existing_user:
+                # Update existing user to ensure vendor_id is set
+                existing_user.vendor_id = vendor.vendor_id
+                existing_user.role = "VENDOR"
+                users.append(existing_user)
+            else:
+                vendor_user = User(
+                    username=username,
+                    password_hash=get_password_hash("vendor123"),
+                    role="VENDOR",
+                    vendor_id=vendor.vendor_id
+                )
+                db.add(vendor_user)
+                users.append(vendor_user)
         
-        # Employee users (select a few employees to have login access)
+        # Employee users (select a few employees to have login access) - update existing or create new
         for idx in [0, 5, 10]:  # First employee from each client
             emp = employees[idx]
-            emp_user = User(
-                username=f"emp{idx+1}",
-                password_hash=get_password_hash("emp123"),
-                role="EMPLOYEE",
-                client_id=emp.client_id,
-                employee_id=emp.employee_id
-            )
-            db.add(emp_user)
-            users.append(emp_user)
+            username = f"emp{idx+1}"
+            existing_user = db.query(User).filter(User.username == username).first()
+            if existing_user:
+                # Update existing user to ensure employee_id and client_id are set
+                existing_user.employee_id = emp.employee_id
+                existing_user.client_id = emp.client_id
+                existing_user.role = "EMPLOYEE"
+                users.append(existing_user)
+            else:
+                emp_user = User(
+                    username=username,
+                    password_hash=get_password_hash("emp123"),
+                    role="EMPLOYEE",
+                    client_id=emp.client_id,
+                    employee_id=emp.employee_id
+                )
+                db.add(emp_user)
+                users.append(emp_user)
         
         db.flush()
         print(f"✅ Created {len(users)} users")
         
         # 5. CREATE CONTRACTS (Different models for testing)
         print("\n📝 Creating Contracts...")
+        
+        # Clear existing contracts first to avoid ID mismatches
+        existing_contracts = db.query(Contract).count()
+        if existing_contracts > 0:
+            print(f"   🗑️  Clearing {existing_contracts} existing contracts...")
+            db.query(Contract).delete()
+            db.flush()
+        
         contracts = []
         admin_user = db.query(User).filter(User.role == "ADMIN").first()
         
+        if not admin_user:
+            raise ValueError("Admin user not found. Please ensure admin user exists before creating contracts.")
+        
         # Contract 1: Client 1 + Vendor 1 → PACKAGE Model
+        # Use actual client/vendor IDs from the database
         contract1 = Contract(
             client_id=clients[0].client_id,
             vendor_id=vendors[0].vendor_id,

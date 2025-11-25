@@ -29,3 +29,12 @@ def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return current_user
 
+
+def get_current_vendor_or_admin(current_user: User = Depends(get_current_user)) -> User:
+    """Allow vendors and admins to access."""
+    if current_user.role not in ["VENDOR", "ADMIN"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Vendor or Admin access required"
+        )
+    return current_user

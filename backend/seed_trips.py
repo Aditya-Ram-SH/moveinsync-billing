@@ -71,19 +71,33 @@ def seed_trips():
                 
                 end_time = start_time + timedelta(minutes=duration_min)
                 
-                # Random employee
+                # Random employee - ensure we have employees
+                if not employees:
+                    print(f"   ⚠️  No employees available for contract {contract.contract_id}, skipping trip")
+                    continue
+                
                 employee = random.choice(employees)
                 
-                # Create trip
+                # Validate trip dates are within contract period
+                trip_date = start_time.date()
+                if trip_date < contract.start_date or trip_date > contract.end_date:
+                    print(f"   ⚠️  Skipping trip outside contract date range: {trip_date}")
+                    continue
+                
+                # Create trip with all required fields
+                vehicle_type = random.choice(["SEDAN", "SUV", "HATCHBACK"])
+                vehicle_number = f"KA-{random.randint(10,99)}-{random.choice(['AB','CD','EF'])}-{random.randint(1000,9999)}"
+                trip_type = random.choice(["INBOUND", "OUTBOUND"])
+                
                 trip = Trip(
                     contract_id=contract.contract_id,
                     client_id=contract.client_id,
                     vendor_id=contract.vendor_id,
-                    employee_id=employee.employee_id,
+                    employee_id=employee.employee_id,  # Always set employee_id
                     booking_time=booking_time,
-                    vehicle_type=random.choice(["SEDAN", "SUV", "HATCHBACK"]),
-                    vehicle_number=f"KA-{random.randint(10,99)}-{random.choice(['AB','CD','EF'])}-{random.randint(1000,9999)}",
-                    trip_type=random.choice(["INBOUND", "OUTBOUND"]),
+                    vehicle_type=vehicle_type,
+                    vehicle_number=vehicle_number,
+                    trip_type=trip_type,
                     start_time=start_time,
                     end_time=end_time,
                     distance_km=distance_km,
@@ -114,8 +128,11 @@ def seed_trips():
         print(f"   • {trips_created} Trips created for November 2025")
         print(f"   • {len(contracts)} Contracts covered")
         print(f"\n💡 Next steps:")
-        print(f"   1. Run billing: POST /billing/run")
+        print(f"   1. Create billing runs for November 2025:")
+        print(f"      - Use billing_month: 2025-11-01 (must be first day of month)")
+        print(f"      - Example: Client ID 1, Vendor ID 1, Month: 2025-11")
         print(f"   2. View results in the frontend")
+        print(f"\n⚠️  IMPORTANT: Billing month must be 2025-11-01 to process these trips!")
         
     except Exception as e:
         db.rollback()

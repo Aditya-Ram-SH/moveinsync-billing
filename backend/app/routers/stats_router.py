@@ -1,7 +1,10 @@
 """
 Statistics and dashboard endpoints.
 """
-from fastapi import APIRouter, Depends
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
@@ -16,6 +19,7 @@ from app.models import (
     Vendor,
 )
 from app.routers.deps import get_current_user
+from app.utils.username_mapping import get_username_from_client_id, get_username_from_vendor_id
 
 router = APIRouter()
 
@@ -222,7 +226,10 @@ def get_dashboard_stats(
             "billing_run_id": recent_run.billing_run_id,
             "client_id": recent_run.client_id,
             "vendor_id": recent_run.vendor_id,
-            "billing_month": recent_run.billing_month.isoformat() if recent_run.billing_month else None,
+            "client_username": get_username_from_client_id(db, recent_run.client_id),
+            "vendor_username": get_username_from_vendor_id(db, recent_run.vendor_id),
+            "billing_start": recent_run.billing_start.isoformat() if recent_run.billing_start else None,
+            "billing_end": recent_run.billing_end.isoformat() if recent_run.billing_end else None,
             "status": recent_run.status,
             "started_at": recent_run.started_at.isoformat() if recent_run.started_at else None,
             "completed_at": recent_run.completed_at.isoformat() if recent_run.completed_at else None,
@@ -230,4 +237,350 @@ def get_dashboard_stats(
         }
     
     return stats
+
+
+@router.get("/client-analytics")
+def get_client_analytics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get detailed analytics data for client dashboard charts.
+    Returns cost trends, vendor breakdown, trips over time, etc.
+    """
+    if current_user.role != "CLIENT":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is only available for CLIENT users"
+        )
+    
+    if current_user.client_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User account missing client_id. Please contact administrator."
+        )
+    
+    client_id = current_user.client_id
+    
+    # Calculate date range (last 12 months)
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=365)
+    
+    # 1. Cost Trends Over Time (monthly)
+    cost_trends_query = (
+        db.query(
+            func.date_trunc('month', BillingRun.billing_start).label('month'),
+            func.sum(TripCharge.final_cost).label('total_cost'),
+            func.count(Trip.trip_id).label('trip_count')
+        )
+        .join(TripCharge, TripCharge.billing_run_id == BillingRun.billing_run_id)
+        .join(Trip, Trip.trip_id == TripCharge.trip_id)
+        .filter(
+            BillingRun.client_id == client_id,
+            BillingRun.status == "SUCCESS",
+            BillingRun.billing_start >= start_date.date()
+        )
+        .group_by(func.date_trunc('month', BillingRun.billing_start))
+        .order_by(func.date_trunc('month', BillingRun.billing_start))
+    )
+    cost_trends = [
+        {
+            "month": row.month.strftime("%Y-%m") if row.month else None,
+            "total_cost": float(row.total_cost or 0),
+            "trip_count": row.trip_count or 0
+        }
+        for row in cost_trends_query.all()
+    ]
+    
+    # 2. Cost Breakdown by Vendor
+    cost_by_vendor_query = (
+        db.query(
+            Trip.vendor_id,
+            func.sum(TripCharge.final_cost).label('total_cost'),
+            func.count(Trip.trip_id).label('trip_count')
+        )
+        .join(TripCharge, TripCharge.trip_id == Trip.trip_id)
+        .filter(Trip.client_id == client_id)
+        .group_by(Trip.vendor_id)
+        .order_by(func.sum(TripCharge.final_cost).desc())
+    )
+    cost_by_vendor = []
+    for row in cost_by_vendor_query.all():
+        vendor_name = get_username_from_vendor_id(db, row.vendor_id) or f"vendor_{row.vendor_id}"
+        cost_by_vendor.append({
+            "vendor_id": row.vendor_id,
+            "vendor_name": vendor_name,
+            "total_cost": float(row.total_cost or 0),
+            "trip_count": row.trip_count or 0
+        })
+    
+    # 3. Trips Over Time (monthly)
+    trips_over_time_query = (
+        db.query(
+            func.date_trunc('month', Trip.start_time).label('month'),
+            func.count(Trip.trip_id).label('trip_count')
+        )
+        .filter(
+            Trip.client_id == client_id,
+            Trip.start_time >= start_date
+        )
+        .group_by(func.date_trunc('month', Trip.start_time))
+        .order_by(func.date_trunc('month', Trip.start_time))
+    )
+    trips_over_time = [
+        {
+            "month": row.month.strftime("%Y-%m") if row.month else None,
+            "trip_count": row.trip_count or 0
+        }
+        for row in trips_over_time_query.all()
+    ]
+    
+    # 4. Trip Status Distribution
+    status_distribution_query = (
+        db.query(
+            Trip.status,
+            func.count(Trip.trip_id).label('count')
+        )
+        .filter(Trip.client_id == client_id)
+        .group_by(Trip.status)
+    )
+    trip_status_distribution = [
+        {
+            "status": row.status or "UNKNOWN",
+            "count": row.count or 0
+        }
+        for row in status_distribution_query.all()
+    ]
+    
+    # 5. Distance Over Time (monthly)
+    distance_over_time_query = (
+        db.query(
+            func.date_trunc('month', Trip.start_time).label('month'),
+            func.sum(Trip.distance_km).label('total_distance')
+        )
+        .filter(
+            Trip.client_id == client_id,
+            Trip.start_time >= start_date
+        )
+        .group_by(func.date_trunc('month', Trip.start_time))
+        .order_by(func.date_trunc('month', Trip.start_time))
+    )
+    distance_over_time = [
+        {
+            "month": row.month.strftime("%Y-%m") if row.month else None,
+            "total_distance": float(row.total_distance or 0)
+        }
+        for row in distance_over_time_query.all()
+    ]
+    
+    # 6. Billing Runs Timeline
+    billing_runs_query = (
+        db.query(BillingRun)
+        .filter(
+            BillingRun.client_id == client_id,
+            BillingRun.billing_start >= start_date.date()
+        )
+        .order_by(BillingRun.billing_start.desc())
+        .limit(12)
+    )
+    
+    billing_runs_timeline = []
+    for run in billing_runs_query.all():
+        # Get total cost for this billing run
+        total_cost = (
+            db.query(func.sum(TripCharge.final_cost))
+            .filter(TripCharge.billing_run_id == run.billing_run_id)
+            .scalar() or Decimal("0")
+        )
+        
+        billing_runs_timeline.append({
+            "billing_run_id": run.billing_run_id,
+            "billing_start": run.billing_start.isoformat() if run.billing_start else None,
+            "billing_end": run.billing_end.isoformat() if run.billing_end else None,
+            "status": run.status,
+            "total_cost": float(total_cost),
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+        })
+    
+    return {
+        "cost_trends": cost_trends,
+        "cost_by_vendor": cost_by_vendor,
+        "trips_over_time": trips_over_time,
+        "trip_status_distribution": trip_status_distribution,
+        "distance_over_time": distance_over_time,
+        "billing_runs_timeline": billing_runs_timeline,
+    }
+
+
+@router.get("/vendor-analytics")
+def get_vendor_analytics(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Get detailed analytics data for vendor dashboard charts.
+    Returns payout trends, client breakdown, trips over time, etc.
+    """
+    if current_user.role != "VENDOR":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint is only available for VENDOR users"
+        )
+    
+    if current_user.vendor_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User account missing vendor_id. Please contact administrator."
+        )
+    
+    vendor_id = current_user.vendor_id
+    
+    # Calculate date range (last 12 months)
+    end_date = datetime.utcnow()
+    start_date = end_date - timedelta(days=365)
+    
+    # 1. Payout Trends Over Time (monthly)
+    payout_trends_query = (
+        db.query(
+            func.date_trunc('month', BillingRun.billing_start).label('month'),
+            func.sum(TripCharge.vendor_payout).label('total_payout'),
+            func.count(Trip.trip_id).label('trip_count')
+        )
+        .join(TripCharge, TripCharge.billing_run_id == BillingRun.billing_run_id)
+        .join(Trip, Trip.trip_id == TripCharge.trip_id)
+        .filter(
+            BillingRun.vendor_id == vendor_id,
+            BillingRun.status == "SUCCESS",
+            BillingRun.billing_start >= start_date.date()
+        )
+        .group_by(func.date_trunc('month', BillingRun.billing_start))
+        .order_by(func.date_trunc('month', BillingRun.billing_start))
+    )
+    payout_trends = [
+        {
+            "month": row.month.strftime("%Y-%m") if row.month else None,
+            "total_payout": float(row.total_payout or 0),
+            "trip_count": row.trip_count or 0
+        }
+        for row in payout_trends_query.all()
+    ]
+    
+    # 2. Payout Breakdown by Client
+    payout_by_client_query = (
+        db.query(
+            Trip.client_id,
+            func.sum(TripCharge.vendor_payout).label('total_payout'),
+            func.count(Trip.trip_id).label('trip_count')
+        )
+        .join(TripCharge, TripCharge.trip_id == Trip.trip_id)
+        .filter(Trip.vendor_id == vendor_id)
+        .group_by(Trip.client_id)
+        .order_by(func.sum(TripCharge.vendor_payout).desc())
+    )
+    payout_by_client = []
+    for row in payout_by_client_query.all():
+        client_name = get_username_from_client_id(db, row.client_id) or f"client_{row.client_id}"
+        payout_by_client.append({
+            "client_id": row.client_id,
+            "client_name": client_name,
+            "total_payout": float(row.total_payout or 0),
+            "trip_count": row.trip_count or 0
+        })
+    
+    # 3. Trips Over Time (monthly)
+    trips_over_time_query = (
+        db.query(
+            func.date_trunc('month', Trip.start_time).label('month'),
+            func.count(Trip.trip_id).label('trip_count')
+        )
+        .filter(
+            Trip.vendor_id == vendor_id,
+            Trip.start_time >= start_date
+        )
+        .group_by(func.date_trunc('month', Trip.start_time))
+        .order_by(func.date_trunc('month', Trip.start_time))
+    )
+    trips_over_time = [
+        {
+            "month": row.month.strftime("%Y-%m") if row.month else None,
+            "trip_count": row.trip_count or 0
+        }
+        for row in trips_over_time_query.all()
+    ]
+    
+    # 4. Trip Status Distribution
+    status_distribution_query = (
+        db.query(
+            Trip.status,
+            func.count(Trip.trip_id).label('count')
+        )
+        .filter(Trip.vendor_id == vendor_id)
+        .group_by(Trip.status)
+    )
+    trip_status_distribution = [
+        {
+            "status": row.status or "UNKNOWN",
+            "count": row.count or 0
+        }
+        for row in status_distribution_query.all()
+    ]
+    
+    # 5. Distance Over Time (monthly)
+    distance_over_time_query = (
+        db.query(
+            func.date_trunc('month', Trip.start_time).label('month'),
+            func.sum(Trip.distance_km).label('total_distance')
+        )
+        .filter(
+            Trip.vendor_id == vendor_id,
+            Trip.start_time >= start_date
+        )
+        .group_by(func.date_trunc('month', Trip.start_time))
+        .order_by(func.date_trunc('month', Trip.start_time))
+    )
+    distance_over_time = [
+        {
+            "month": row.month.strftime("%Y-%m") if row.month else None,
+            "total_distance": float(row.total_distance or 0)
+        }
+        for row in distance_over_time_query.all()
+    ]
+    
+    # 6. Billing Runs Timeline
+    billing_runs_query = (
+        db.query(BillingRun)
+        .filter(
+            BillingRun.vendor_id == vendor_id,
+            BillingRun.billing_start >= start_date.date()
+        )
+        .order_by(BillingRun.billing_start.desc())
+        .limit(12)
+    )
+    
+    billing_runs_timeline = []
+    for run in billing_runs_query.all():
+        # Get total payout for this billing run
+        total_payout = (
+            db.query(func.sum(TripCharge.vendor_payout))
+            .filter(TripCharge.billing_run_id == run.billing_run_id)
+            .scalar() or Decimal("0")
+        )
+        
+        billing_runs_timeline.append({
+            "billing_run_id": run.billing_run_id,
+            "billing_start": run.billing_start.isoformat() if run.billing_start else None,
+            "billing_end": run.billing_end.isoformat() if run.billing_end else None,
+            "status": run.status,
+            "total_payout": float(total_payout),
+            "started_at": run.started_at.isoformat() if run.started_at else None,
+        })
+    
+    return {
+        "payout_trends": payout_trends,
+        "payout_by_client": payout_by_client,
+        "trips_over_time": trips_over_time,
+        "trip_status_distribution": trip_status_distribution,
+        "distance_over_time": distance_over_time,
+        "billing_runs_timeline": billing_runs_timeline,
+    }
 

@@ -1,4 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
+import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell, AreaChart, Area } from "recharts";
 
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { api, get } from "../api/axios";
@@ -20,12 +21,30 @@ type DashboardStats = {
     billing_run_id: number;
     client_id: number;
     vendor_id: number;
-    billing_month: string;
+    client_username?: string;
+    vendor_username?: string;
+    billing_start: string;
+    billing_end: string;
     status: string;
     started_at: string;
     completed_at: string | null;
     notes: string | null;
   } | null;
+};
+
+type EmployeeTrip = {
+  trip_id: number;
+  trip_type: string;
+  start_time: string;
+  end_time: string;
+  booking_time: string | null;
+  distance_km: number;
+  duration_min: number;
+  status: string;
+  vehicle_type: string | null;
+  vehicle_number: string | null;
+  incentive_amount: number;
+  has_charge: boolean;
 };
 
 export const Dashboard = () => {
@@ -100,7 +119,7 @@ const AdminDashboard = ({ stats }: { stats: DashboardStats }) => {
       <div className="flex flex-col gap-2">
         <h1 className="text-4xl font-bold text-slate-900">Admin Dashboard</h1>
         <p className="text-base text-slate-600">
-          Complete system overview and management
+          System-wide overview and statistics
         </p>
       </div>
 
@@ -119,7 +138,7 @@ const AdminDashboard = ({ stats }: { stats: DashboardStats }) => {
           color="green"
         />
         <MetricCard 
-          title="Total Contracts" 
+          title="Active Contracts" 
           value={stats.total_contracts} 
           icon="📝"
           color="purple"
@@ -132,7 +151,7 @@ const AdminDashboard = ({ stats }: { stats: DashboardStats }) => {
         />
       </div>
 
-      {/* Trip Statistics */}
+      {/* Trip Status */}
       <div className="grid gap-6 md:grid-cols-3">
         <MetricCard 
           title="Processed Trips" 
@@ -143,7 +162,6 @@ const AdminDashboard = ({ stats }: { stats: DashboardStats }) => {
         <MetricCard 
           title="Pending Trips" 
           value={stats.pending_trips} 
-          subtitle="Awaiting billing"
           color="yellow"
         />
         <MetricCard 
@@ -162,67 +180,32 @@ const AdminDashboard = ({ stats }: { stats: DashboardStats }) => {
           large
         />
         <MetricCard 
-          title="Vendor Payouts" 
+          title="Vendor Payout" 
           value={`₹${stats.total_vendor_payout.toFixed(2)}`} 
           color="green"
-          large
         />
         <MetricCard 
           title="Employee Incentives" 
           value={`₹${stats.total_employee_incentives.toFixed(2)}`} 
-          color="purple"
-          large
+          color="yellow"
         />
       </div>
 
-      {/* Recent Activity */}
+      {/* Recent Billing Run */}
       {stats.recent_billing_run && (
-        <Card className="border-2 border-slate-200">
-          <CardHeader className="bg-slate-50">
-            <CardTitle className="text-xl">Most Recent Billing Run</CardTitle>
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Billing Run</CardTitle>
           </CardHeader>
-          <CardContent className="pt-6 space-y-4">
-            <div className="grid gap-4 md:grid-cols-4">
-              <SummaryStat label="Run ID" value={`#${stats.recent_billing_run.billing_run_id}`} />
-              <SummaryStat label="Client ID" value={stats.recent_billing_run.client_id} />
-              <SummaryStat label="Vendor ID" value={stats.recent_billing_run.vendor_id} />
-              <SummaryStat 
-                label="Status" 
-                value={
-                  <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${
-                    stats.recent_billing_run.status === 'SUCCESS' 
-                      ? 'bg-green-100 text-green-700' 
-                      : stats.recent_billing_run.status === 'FAILED'
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-yellow-100 text-yellow-700'
-                  }`}>
-                    {stats.recent_billing_run.status}
-                  </span>
-                } 
-              />
+          <CardContent>
+            <div className="space-y-2">
+              <p className="text-sm text-slate-600">
+                Run #{stats.recent_billing_run.billing_run_id} - {new Date(stats.recent_billing_run.billing_start).toLocaleDateString("en-US", { year: "numeric", month: "long" })}
+              </p>
+              <p className="text-sm text-slate-600">
+                Status: <span className="font-semibold">{stats.recent_billing_run.status}</span>
+              </p>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              <SummaryStat 
-                label="Billing Month" 
-                value={new Date(stats.recent_billing_run.billing_month).toLocaleDateString('en-US', { 
-                  year: 'numeric', 
-                  month: 'long' 
-                })} 
-              />
-              <SummaryStat 
-                label="Completed At" 
-                value={stats.recent_billing_run.completed_at 
-                  ? new Date(stats.recent_billing_run.completed_at).toLocaleString() 
-                  : 'In Progress'
-                } 
-              />
-            </div>
-            {stats.recent_billing_run.notes && (
-              <div className="pt-4 border-t">
-                <p className="text-sm font-semibold text-slate-700 mb-2">Notes</p>
-                <p className="text-base text-slate-600">{stats.recent_billing_run.notes}</p>
-              </div>
-            )}
           </CardContent>
         </Card>
       )}
@@ -231,6 +214,14 @@ const AdminDashboard = ({ stats }: { stats: DashboardStats }) => {
 };
 
 const ClientDashboard = ({ stats, user }: { stats: DashboardStats; user: any }) => {
+  const { data: analytics, isLoading: analyticsLoading } = useQuery({
+    queryKey: ["client-analytics"],
+    queryFn: () => api.getClientAnalytics(),
+    enabled: user?.role === "CLIENT",
+  });
+
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+
   return (
     <section className="space-y-8">
       <div className="flex flex-col gap-2">
@@ -289,39 +280,212 @@ const ClientDashboard = ({ stats, user }: { stats: DashboardStats; user: any }) 
         />
       </div>
 
+      {/* Charts Row 1 */}
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Cost Trends Over Time */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Cost Trends Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.cost_trends && analytics.cost_trends.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={analytics.cost_trends}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip formatter={(value: number) => `₹${value.toFixed(2)}`} />
+                  <Legend />
+                  <Line type="monotone" dataKey="total_cost" stroke="#FF8042" strokeWidth={2} name="Total Cost (₹)" />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No billing data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Cost Breakdown by Vendor */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Cost Breakdown by Vendor</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.cost_by_vendor && analytics.cost_by_vendor.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={analytics.cost_by_vendor}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ vendor_name, percent }) => `${vendor_name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="total_cost"
+                  >
+                    {analytics.cost_by_vendor.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => `₹${value.toFixed(2)}`} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No vendor data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts Row 2 */}
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Trips Over Time */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Trips Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.trips_over_time && analytics.trips_over_time.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={analytics.trips_over_time}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="trip_count" stroke="#8884d8" strokeWidth={2} name="Trips" />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No trip data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Trip Status Distribution */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Trip Status Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.trip_status_distribution && analytics.trip_status_distribution.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={analytics.trip_status_distribution}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ status, percent }) => `${status} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="count"
+                  >
+                    {analytics.trip_status_distribution.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No status data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts Row 3 */}
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Distance Over Time */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Distance Traveled Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.distance_over_time && analytics.distance_over_time.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={analytics.distance_over_time}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip formatter={(value: number) => `${value.toFixed(1)} km`} />
+                  <Legend />
+                  <Area type="monotone" dataKey="total_distance" stroke="#00C49F" fill="#00C49F" fillOpacity={0.6} name="Distance (km)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No distance data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Billing Runs Timeline */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Billing Runs Timeline</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.billing_runs_timeline && analytics.billing_runs_timeline.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={analytics.billing_runs_timeline}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="billing_start" tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short' })} />
+                  <YAxis />
+                  <Tooltip 
+                    formatter={(value: number) => `₹${value.toFixed(2)}`}
+                    labelFormatter={(value) => `Month: ${new Date(value).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`}
+                  />
+                  <Legend />
+                  <Bar dataKey="total_cost" fill="#FF8042" name="Total Cost (₹)" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No billing runs available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Recent Billing */}
       {stats.recent_billing_run && (
-        <Card className="border-2 border-blue-200">
-          <CardHeader className="bg-blue-50">
-            <CardTitle className="text-xl">Recent Billing Activity</CardTitle>
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Billing Run</CardTitle>
           </CardHeader>
-          <CardContent className="pt-6">
-            <div className="space-y-3">
-              <SummaryStat 
-                label="Last Billing Run" 
-                value={`#${stats.recent_billing_run.billing_run_id}`} 
-              />
-              <SummaryStat 
-                label="Billing Month" 
-                value={new Date(stats.recent_billing_run.billing_month).toLocaleDateString('en-US', { 
-                  year: 'numeric', 
-                  month: 'long' 
-                })} 
-              />
-              <SummaryStat 
-                label="Status" 
-                value={
-                  <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${
-                    stats.recent_billing_run.status === 'SUCCESS' 
-                      ? 'bg-green-100 text-green-700' 
-                      : stats.recent_billing_run.status === 'FAILED'
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-yellow-100 text-yellow-700'
-                  }`}>
-                    {stats.recent_billing_run.status}
-                  </span>
-                } 
-              />
+          <CardContent>
+            <div className="space-y-2">
+              <p className="text-sm text-slate-600">
+                Run #{stats.recent_billing_run.billing_run_id} - {new Date(stats.recent_billing_run.billing_start).toLocaleDateString("en-US", { year: "numeric", month: "long" })}
+              </p>
+              <p className="text-sm text-slate-600">
+                Status: <span className="font-semibold">{stats.recent_billing_run.status}</span>
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -331,17 +495,25 @@ const ClientDashboard = ({ stats, user }: { stats: DashboardStats; user: any }) 
 };
 
 const VendorDashboard = ({ stats, user }: { stats: DashboardStats; user: any }) => {
+  const { data: analytics, isLoading: analyticsLoading } = useQuery({
+    queryKey: ["vendor-analytics"],
+    queryFn: () => api.getVendorAnalytics(),
+    enabled: user?.role === "VENDOR",
+  });
+
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8', '#82ca9d'];
+
   return (
     <section className="space-y-8">
       <div className="flex flex-col gap-2">
         <h1 className="text-4xl font-bold text-slate-900">Vendor Dashboard</h1>
         <p className="text-base text-slate-600">
-          Your vendor operations and billing summary
+          Your vendor operations and earnings overview
         </p>
       </div>
 
       {/* Key Metrics */}
-      <div className="grid gap-6 md:grid-cols-3">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard 
           title="Active Clients" 
           value={stats.total_clients} 
@@ -360,9 +532,15 @@ const VendorDashboard = ({ stats, user }: { stats: DashboardStats; user: any }) 
           icon="🚗"
           color="orange"
         />
+        <MetricCard 
+          title="Billing Runs" 
+          value={stats.total_billing_runs} 
+          icon="💰"
+          color="green"
+        />
       </div>
 
-      {/* Operations Stats */}
+      {/* Trip Details */}
       <div className="grid gap-6 md:grid-cols-3">
         <MetricCard 
           title="Processed Trips" 
@@ -383,39 +561,212 @@ const VendorDashboard = ({ stats, user }: { stats: DashboardStats; user: any }) 
         />
       </div>
 
+      {/* Charts Row 1 */}
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Payout Trends Over Time */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Payout Trends Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.payout_trends && analytics.payout_trends.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={analytics.payout_trends}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip formatter={(value: number) => `₹${value.toFixed(2)}`} />
+                  <Legend />
+                  <Line type="monotone" dataKey="total_payout" stroke="#00C49F" strokeWidth={2} name="Total Payout (₹)" />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No payout data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Payout Breakdown by Client */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Payout Breakdown by Client</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.payout_by_client && analytics.payout_by_client.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={analytics.payout_by_client}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ client_name, percent }) => `${client_name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="total_payout"
+                  >
+                    {analytics.payout_by_client.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip formatter={(value: number) => `₹${value.toFixed(2)}`} />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No client data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts Row 2 */}
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Trips Over Time */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Trips Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.trips_over_time && analytics.trips_over_time.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={analytics.trips_over_time}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="trip_count" stroke="#8884d8" strokeWidth={2} name="Trips" />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No trip data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Trip Status Distribution */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Trip Status Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.trip_status_distribution && analytics.trip_status_distribution.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={analytics.trip_status_distribution}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ status, percent }) => `${status} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="count"
+                  >
+                    {analytics.trip_status_distribution.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No status data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts Row 3 */}
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Distance Over Time */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Distance Traveled Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.distance_over_time && analytics.distance_over_time.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <AreaChart data={analytics.distance_over_time}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="month" />
+                  <YAxis />
+                  <Tooltip formatter={(value: number) => `${value.toFixed(1)} km`} />
+                  <Legend />
+                  <Area type="monotone" dataKey="total_distance" stroke="#00C49F" fill="#00C49F" fillOpacity={0.6} name="Distance (km)" />
+                </AreaChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No distance data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Billing Runs Timeline */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Billing Runs Timeline</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {analyticsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : analytics?.billing_runs_timeline && analytics.billing_runs_timeline.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={analytics.billing_runs_timeline}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="billing_start" tickFormatter={(value) => new Date(value).toLocaleDateString('en-US', { month: 'short' })} />
+                  <YAxis />
+                  <Tooltip 
+                    formatter={(value: number) => `₹${value.toFixed(2)}`}
+                    labelFormatter={(value) => `Month: ${new Date(value).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}`}
+                  />
+                  <Legend />
+                  <Bar dataKey="total_payout" fill="#00C49F" name="Total Payout (₹)" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No billing runs available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Recent Billing */}
       {stats.recent_billing_run && (
-        <Card className="border-2 border-green-200">
-          <CardHeader className="bg-green-50">
-            <CardTitle className="text-xl">Recent Billing Activity</CardTitle>
+        <Card>
+          <CardHeader>
+            <CardTitle>Recent Billing Run</CardTitle>
           </CardHeader>
-          <CardContent className="pt-6">
-            <div className="space-y-3">
-              <SummaryStat 
-                label="Last Billing Run" 
-                value={`#${stats.recent_billing_run.billing_run_id}`} 
-              />
-              <SummaryStat 
-                label="Billing Month" 
-                value={new Date(stats.recent_billing_run.billing_month).toLocaleDateString('en-US', { 
-                  year: 'numeric', 
-                  month: 'long' 
-                })} 
-              />
-              <SummaryStat 
-                label="Status" 
-                value={
-                  <span className={`inline-flex items-center rounded-full px-3 py-1 text-sm font-semibold ${
-                    stats.recent_billing_run.status === 'SUCCESS' 
-                      ? 'bg-green-100 text-green-700' 
-                      : stats.recent_billing_run.status === 'FAILED'
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-yellow-100 text-yellow-700'
-                  }`}>
-                    {stats.recent_billing_run.status}
-                  </span>
-                } 
-              />
+          <CardContent>
+            <div className="space-y-2">
+              <p className="text-sm text-slate-600">
+                Run #{stats.recent_billing_run.billing_run_id} - {new Date(stats.recent_billing_run.billing_start).toLocaleDateString("en-US", { year: "numeric", month: "long" })}
+              </p>
+              <p className="text-sm text-slate-600">
+                Status: <span className="font-semibold">{stats.recent_billing_run.status}</span>
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -425,11 +776,55 @@ const VendorDashboard = ({ stats, user }: { stats: DashboardStats; user: any }) 
 };
 
 const EmployeeDashboard = ({ stats, user }: { stats: DashboardStats; user: any }) => {
-  // Use recent_trips from stats if available, otherwise fetch from API
-  const recentTrips = stats.recent_trips || [];
+  const { data: trips, isLoading: tripsLoading } = useQuery<EmployeeTrip[]>({
+    queryKey: ["employee-trips", user.employee_id],
+    queryFn: () => api.getEmployeeTrips(),
+    enabled: user?.role === "EMPLOYEE" && !!user?.employee_id,
+  });
+
+  // Process trips for charts
+  const tripsData = trips || [];
   
-  // Hardcoded ₹250 for demo - always show this
-  const totalIncentives = 250.00;
+  // Group trips by date for line chart
+  const tripsByDate = tripsData.reduce((acc, trip) => {
+    if (!trip.start_time) return acc;
+    const date = new Date(trip.start_time).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    if (!acc[date]) {
+      acc[date] = { date, trips: 0, distance: 0, incentives: 0 };
+    }
+    acc[date].trips += 1;
+    acc[date].distance += trip.distance_km;
+    acc[date].incentives += trip.incentive_amount;
+    return acc;
+  }, {} as Record<string, { date: string; trips: number; distance: number; incentives: number }>);
+  
+  const chartData = Object.values(tripsByDate).slice(-14).sort((a, b) => 
+    new Date(a.date).getTime() - new Date(b.date).getTime()
+  );
+
+  // Trip type distribution
+  const tripTypeData = tripsData.reduce((acc, trip) => {
+    const type = trip.trip_type || 'UNKNOWN';
+    acc[type] = (acc[type] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  
+  const pieData = Object.entries(tripTypeData).map(([name, value]) => ({ name, value }));
+  const COLORS = ['#0088FE', '#00C49F', '#FFBB28', '#FF8042', '#8884d8'];
+
+  // Status distribution
+  const statusData = tripsData.reduce((acc, trip) => {
+    const status = trip.status || 'UNKNOWN';
+    acc[status] = (acc[status] || 0) + 1;
+    return acc;
+  }, {} as Record<string, number>);
+  
+  const statusChartData = Object.entries(statusData).map(([name, value]) => ({ name, value }));
+
+  // Calculate totals
+  const totalIncentives = tripsData.reduce((sum, trip) => sum + trip.incentive_amount, 0);
+  const totalDistance = tripsData.reduce((sum, trip) => sum + trip.distance_km, 0);
+  const tripsWithIncentives = tripsData.filter(t => t.incentive_amount > 0).length;
 
   return (
     <section className="space-y-8">
@@ -452,30 +847,8 @@ const EmployeeDashboard = ({ stats, user }: { stats: DashboardStats; user: any }
         </CardContent>
       </Card>
 
-      {/* Incentives - Main Highlight */}
-      <Card className="border-4 border-yellow-400 bg-gradient-to-br from-yellow-50 to-orange-50 shadow-lg">
-        <CardHeader className="bg-yellow-100">
-          <CardTitle className="text-2xl flex items-center gap-2">
-            💰 Total Incentives Earned
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="pt-6">
-          <div className="text-center">
-            <p className="text-6xl font-bold text-yellow-700 mb-3">
-              ₹{totalIncentives.toFixed(2)}
-            </p>
-            <p className="text-lg text-slate-700 font-semibold">
-              Total incentives earned for delays and extra hours
-            </p>
-            <p className="text-sm text-green-600 mt-2 font-semibold">
-              ✅ Incentives earned from delayed trips
-            </p>
-          </div>
-        </CardContent>
-      </Card>
-
       {/* Key Metrics */}
-      <div className="grid gap-6 md:grid-cols-2">
+      <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         <MetricCard 
           title="Total Trips" 
           value={stats.total_trips} 
@@ -488,81 +861,238 @@ const EmployeeDashboard = ({ stats, user }: { stats: DashboardStats; user: any }
           value={`${stats.total_distance_km.toFixed(1)} km`} 
           icon="📍"
           color="orange"
+        />
+        <MetricCard 
+          title="Total Incentives" 
+          value={`₹${stats.total_employee_incentives.toFixed(2)}`} 
+          icon="💰"
+          color="yellow"
           large
+        />
+        <MetricCard 
+          title="Processed Trips" 
+          value={stats.processed_trips} 
+          subtitle={`of ${stats.total_trips} total`}
+          color="green"
         />
       </div>
 
-      {/* Recent Trips */}
-      {recentTrips && recentTrips.length > 0 && (
-        <Card className="border-2 border-blue-200">
-          <CardHeader className="bg-blue-50">
-            <CardTitle className="text-xl">🚗 Recent Trips</CardTitle>
+      {/* Charts Row 1 */}
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Trips Over Time */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Trips Over Time</CardTitle>
           </CardHeader>
-          <CardContent className="pt-4">
-            <div className="space-y-3">
-              {recentTrips.map((trip: any) => (
-                <div
-                  key={trip.trip_id}
-                  className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 hover:bg-slate-50"
-                >
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3">
-                      <span className="text-lg font-bold text-slate-900">
-                        Trip #{trip.trip_id}
-                      </span>
-                      <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-semibold text-blue-700">
-                        {trip.trip_type || "N/A"}
-                      </span>
-                      <span
-                        className={`rounded-full px-2 py-1 text-xs font-semibold ${
+          <CardContent>
+            {tripsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <LineChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="trips" stroke="#8884d8" strokeWidth={2} name="Trips" />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No trip data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Trip Type Distribution */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Trip Type Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {tripsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : pieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    labelLine={false}
+                    label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                    outerRadius={80}
+                    fill="#8884d8"
+                    dataKey="value"
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                    ))}
+                  </Pie>
+                  <Tooltip />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No trip data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Charts Row 2 */}
+      <div className="grid gap-6 md:grid-cols-2">
+        {/* Distance Over Time */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Distance Traveled Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {tripsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : chartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={chartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="distance" fill="#00C49F" name="Distance (km)" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No trip data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Trip Status */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Trip Status Distribution</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {tripsLoading ? (
+              <div className="h-64 flex items-center justify-center">Loading...</div>
+            ) : statusChartData.length > 0 ? (
+              <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={statusChartData}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="name" />
+                  <YAxis />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="value" fill="#FF8042" name="Count" />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-64 flex items-center justify-center text-slate-500">
+                No trip data available
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Incentives Chart */}
+      {chartData.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Incentives Earned Over Time</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={chartData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="date" />
+                <YAxis />
+                <Tooltip formatter={(value: number) => `₹${value.toFixed(2)}`} />
+                <Legend />
+                <Line type="monotone" dataKey="incentives" stroke="#FFBB28" strokeWidth={2} name="Incentives (₹)" />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Recent Trips Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Recent Trip History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {tripsLoading ? (
+            <div className="py-8 text-center text-slate-500">Loading trips...</div>
+          ) : tripsData.length > 0 ? (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b">
+                    <th className="text-left p-2">Trip ID</th>
+                    <th className="text-left p-2">Type</th>
+                    <th className="text-left p-2">Date</th>
+                    <th className="text-left p-2">Distance</th>
+                    <th className="text-left p-2">Duration</th>
+                    <th className="text-left p-2">Status</th>
+                    <th className="text-right p-2">Incentive</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tripsData.slice(0, 10).map((trip) => (
+                    <tr key={trip.trip_id} className="border-b hover:bg-slate-50">
+                      <td className="p-2 font-medium">#{trip.trip_id}</td>
+                      <td className="p-2">
+                        <span className="rounded-full bg-blue-100 px-2 py-1 text-xs text-blue-700">
+                          {trip.trip_type || 'N/A'}
+                        </span>
+                      </td>
+                      <td className="p-2">
+                        {trip.start_time 
+                          ? new Date(trip.start_time).toLocaleDateString('en-US', { 
+                              month: 'short', 
+                              day: 'numeric',
+                              year: 'numeric'
+                            })
+                          : 'N/A'}
+                      </td>
+                      <td className="p-2">{trip.distance_km.toFixed(1)} km</td>
+                      <td className="p-2">{trip.duration_min} min</td>
+                      <td className="p-2">
+                        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${
                           trip.status === "PROCESSED"
                             ? "bg-green-100 text-green-700"
                             : trip.status === "ERROR"
                             ? "bg-red-100 text-red-700"
                             : "bg-yellow-100 text-yellow-700"
-                        }`}
-                      >
-                        {trip.status}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex items-center gap-4 text-sm text-slate-600">
-                      <span>📍 {trip.distance_km?.toFixed(1) || "0"} km</span>
-                      <span>⏱️ {trip.duration_min || "0"} min</span>
-                      {trip.start_time && (
-                        <span>
-                          📅 {new Date(trip.start_time).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric",
-                          })}
+                        }`}>
+                          {trip.status}
                         </span>
-                      )}
-                    </div>
-                  </div>
-                  <div className="ml-4 text-right">
-                    {trip.incentive_amount > 0 ? (
-                      <div className="rounded-lg bg-yellow-100 px-3 py-2">
-                        <p className="text-xs font-semibold text-yellow-700">Incentive</p>
-                        <p className="text-lg font-bold text-yellow-800">₹{trip.incentive_amount.toFixed(2)}</p>
-                      </div>
-                    ) : (
-                      <div className="rounded-lg bg-slate-100 px-3 py-2">
-                        <p className="text-xs font-semibold text-slate-500">No Delay</p>
-                        <p className="text-sm font-medium text-slate-600">₹0.00</p>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              ))}
+                      </td>
+                      <td className="p-2 text-right font-semibold">
+                        {trip.incentive_amount > 0 ? (
+                          <span className="text-yellow-700">₹{trip.incentive_amount.toFixed(2)}</span>
+                        ) : (
+                          <span className="text-slate-400">₹0.00</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            {recentTrips.length === 0 && (
-              <p className="text-center text-sm text-slate-500 py-4">
-                No trips found. Your trips will appear here once they are recorded.
-              </p>
-            )}
-          </CardContent>
-        </Card>
-      )}
+          ) : (
+            <div className="py-8 text-center text-slate-500">
+              No trips found. Your trips will appear here once they are recorded.
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </section>
   );
 };
@@ -610,9 +1140,8 @@ const MetricCard = ({
 };
 
 const SummaryStat = ({ label, value }: { label: string; value: string | number | React.ReactNode }) => (
-  <div>
-    <p className="text-sm font-semibold text-slate-600 mb-1">{label}</p>
-    <div className="text-lg font-semibold text-slate-900">{value}</div>
+  <div className="flex flex-col">
+    <p className="text-sm text-slate-600">{label}</p>
+    <p className="text-2xl font-bold text-slate-900">{value}</p>
   </div>
 );
-

@@ -1,0 +1,79 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+*.whl
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+venv/
+env/
+ENV/
+.venv
+cs/  # Virtual environment directory
+
+# Node
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-debug.log*
+dist/
+dist-ssr/
+*.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# OS
+Thumbs.db
+.DS_Store
+*.Zone.Identifier
+
+# Project specific
+information/  # Exclude information directory
+backend/sample_trips.csv  # Sample data files
+backend/nul  # Windows null device file
+backend/*.csv  # CSV files (except templates if needed)
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.backup
+
+# Alembic
+# Keep alembic versions, but ignore __pycache__ in versions
+backend/alembic/versions/__pycache__/
+

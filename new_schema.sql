@@ -77,33 +77,19 @@ CREATE TABLE billing_runs (
   billing_run_id SERIAL PRIMARY KEY,
   client_id INT NOT NULL REFERENCES clients(client_id),
   vendor_id INT NOT NULL REFERENCES vendors(vendor_id),
-  billing_month DATE NOT NULL,
+  billing_start DATE NOT NULL,
+  billing_end DATE NOT NULL,
   triggered_by INT REFERENCES users(user_id),
   status billing_status_enum DEFAULT 'RUNNING',
   started_at TIMESTAMPTZ DEFAULT NOW(),
   completed_at TIMESTAMPTZ,
   notes TEXT,
-  CONSTRAINT uniq_billing_run UNIQUE (client_id, vendor_id, billing_month)
+  CONSTRAINT uniq_billing_run UNIQUE (client_id, vendor_id, billing_start),
+  CONSTRAINT chk_billing_period CHECK (billing_end > billing_start)
 );
 
 CREATE INDEX idx_billing_client_vendor ON billing_runs(client_id, vendor_id);
-CREATE INDEX idx_billing_month ON billing_runs(billing_month);
-
--- 7a. Billing month validation trigger
-CREATE FUNCTION enforce_first_day_month()
-RETURNS TRIGGER LANGUAGE plpgsql AS $$
-BEGIN
-  IF date_trunc('month', NEW.billing_month) <> NEW.billing_month THEN
-    RAISE EXCEPTION 'billing_month must be the first day of the month';
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
-CREATE CONSTRAINT TRIGGER chk_billing_month_firstday
-AFTER INSERT OR UPDATE ON billing_runs
-DEFERRABLE INITIALLY DEFERRED
-FOR EACH ROW EXECUTE FUNCTION enforce_first_day_month();
+CREATE INDEX idx_billing_start ON billing_runs(billing_start);
 
 -- 8. TRIPS (Unified Ingestion Schema)
 CREATE TABLE trips (
